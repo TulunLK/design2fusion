@@ -3,3 +3,8 @@ __pycache__/
 .DS_Store
 *.log
 /out/
+/build/
+/dist/
+/design2fusion
+*.spec
+test_print.spec

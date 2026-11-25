@@ -8,12 +8,23 @@ import subprocess
 import sys
 import tempfile
 
-from . import __version__
-from .comp import generate_comp
-from .convert import info, normalize, pick_frame
-from .mcp import MCP
-from .model import build_manifest
-from .settings import write_kit
+# Imports compatibles con pyinstaller (standalone) y módulo normal
+try:
+    from . import __version__
+    from .comp import generate_comp
+    from .convert import info, normalize, pick_frame
+    from .mcp import MCP
+    from .model import build_manifest
+    from .settings import write_kit
+except ImportError:
+    # Modo standalone (pyinstaller)
+    import d2f
+    __version__ = d2f.__version__
+    from d2f.comp import generate_comp
+    from d2f.convert import info, normalize, pick_frame
+    from d2f.mcp import MCP
+    from d2f.model import build_manifest
+    from d2f.settings import write_kit
 
 OUT_BASE = os.path.expanduser("~/Documentos/MotionGraphic/design2fusion")
 
@@ -148,7 +159,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     if a.ui:
-        from .ui import serve
+        try:
+            from .ui import serve
+        except ImportError:
+            from d2f.ui import serve
         return serve(a.port)
     if not a.src:
         ap.error("falta el archivo de entrada (o usá --ui)")
@@ -165,3 +179,8 @@ def main(argv=None):
     else:
         _print(res)
     return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

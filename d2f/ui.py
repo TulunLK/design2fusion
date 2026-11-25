@@ -3,12 +3,45 @@ import html
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .cli import OUT_BASE, convert
+# Imports compatibles con pyinstaller (standalone) y módulo normal
+try:
+    from . import __version__
+    from .cli import OUT_BASE, convert
+except ImportError:
+    # Modo standalone (pyinstaller)
+    import d2f
+    __version__ = d2f.__version__
+    from d2f.cli import OUT_BASE, convert
+
+# En pyinstaller, __file__ apunta al directorio temporal de extracción.
+# Detectamos si estamos en modo frozen y usamos el directorio real del repo si existe.
+if getattr(sys, "frozen", False):
+    # Modo pyinstaller: no hay .git, la actualización no aplica
+    REPO_DIR = None
+else:
+    REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def git_update():
+    """git pull --ff-only en el repo. Devuelve (ok, mensaje)."""
+    if not REPO_DIR:
+        return False, "Actualización no disponible en modo ejecutable (pyinstaller)."
+    if not os.path.isdir(os.path.join(REPO_DIR, ".git")):
+        return False, "No es un repositorio git."
+    try:
+        r = subprocess.run(["git", "-C", REPO_DIR, "pull", "--ff-only"],
+                           capture_output=True, text=True, timeout=180)
+        msg = (r.stdout + r.stderr).strip() or "(sin salida)"
+        return r.returncode == 0, msg
+    except Exception as e:
+        return False, str(e)
 
 PAGE = """<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
@@ -17,9 +50,22 @@ PAGE = """<!doctype html>
   :root { color-scheme: dark; }
   body { font: 15px/1.5 system-ui, sans-serif; background: #11151c; color: #e6e9ef;
           max-width: 900px; margin: 0 auto; padding: 32px 20px 60px; min-height: 100vh; }
-  header { text-align: center; margin-bottom: 32px; }
+  header { text-align: center; margin-bottom: 32px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   h1 { font-size: 28px; margin: 0 0 8px; font-weight: 700; }
   .tagline { color: #8b95a7; font-size: 14px; }
+
+  /* Version bar */
+  .version-bar {
+    background: rgba(232,69,44,.12); border-bottom: 1px solid #2a3342;
+    padding: 8px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .version-bar .ver { font-size: 12px; font-weight: 600; color: #c8d0e0; }
+  .version-bar .btn-update {
+    background: transparent; border: 1px solid #2a3342; color: #9aa5b8;
+    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    transition: border-color .1s, color .1s, background .1s;
+  }
+  .version-bar .btn-update:hover { border-color: #e8452c; color: #e8452c; background: rgba(232,69,44,.1); }
 
   /* DROP ZONE */
   .drop-zone {
@@ -109,6 +155,177 @@ PAGE = """<!doctype html>
 
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid transparent; border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; margin-right: 8px; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
+</style></head><body>
+<header>
+  <h1>design2fusion</h1>
+  <p class="tagline">Figma · Penpot · FigCraft → nodos de Fusion (DaVinci Resolve)</p>
+  <div class="version-bar">
+    <span class="ver">{{VER}}</span>
+    <button class="btn-update" id="updateBtn">Actualizar</button>
+  </div>
+</header>
+
+<main>
+  <!-- DROP ZONE -->
+  <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Soltar archivo de diseño">
+    <span class="drop-icon" aria-hidden="true">📁</span>
+    <div class="drop-title">Arrastra tu archivo aquí</div>
+    <div class="drop-hint">o haz clic para seleccionar</div>
+    <div class="drop-formats">Formatos: <code>.figcraft</code> <code>.penpot</code> <code>.fig</code> <code>.json</code> (con carpeta <code>images/</code>) · URL de Figma</div>
+    <input type="file" id="fileInput" name="file" accept=".figcraft,.penpot,.fig,.json">
+  </div>
+
+  <!-- OR -->
+  <div class="or-divider"><span>O una ruta local</span></div>
+
+  <!-- PATH INPUT -->
+  <div class="path-row">
+    <input type="text" id="pathInput" placeholder="/home/alan/Descargas/mi-diseño.figcraft" aria-label="Ruta del archivo en el equipo">
+  </div>
+
+  <!-- OPTIONS -->
+  <div class="options">
+    <div class="opt">
+      <label>Frame (nombre o id, opcional)</label>
+      <input type="text" id="frameInput" placeholder="Slide 16:9 - 1">
+    </div>
+    <div class="opt">
+      <label>Escala PNG</label>
+      <input type="number" id="scaleInput" value="1" step="0.5" min="0.1" max="8">
+    </div>
+  </div>
+
+  <!-- BUTTON -->
+  <div class="btn-row">
+    <button id="go" type="button">Convertir</button>
+  </div>
+
+  <!-- OUTPUT -->
+  <section class="output-section" id="outSection" aria-live="polite"></section>
+</main>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const pathInput = document.getElementById('pathInput');
+const frameInput = document.getElementById('frameInput');
+const scaleInput = document.getElementById('scaleInput');
+const goBtn = document.getElementById('go');
+const outSection = document.getElementById('outSection');
+const updateBtn = document.getElementById('updateBtn');
+
+let currentVersion = "0.2.0";
+
+/* Check for updates */
+async function checkUpdate() {
+  try {
+    const [ok, msg] = await fetch('/update', { method: 'POST' }).then(r => r.json());
+    if (ok) {
+      currentVersion = msg.split(' ')[0];  // msg = "ok v0.2.1"
+      document.querySelector('.ver').textContent = currentVersion;
+      alert("Actualizado a " + currentVersion + "\n" + msg);
+    } else {
+      alert("Error al actualizar:\n" + msg);
+    }
+  } catch (e) {
+    alert("Error al conectar con el servidor de actualización");
+  }
+}
+
+async function convertFile() {
+  const file = fileInput.files[0];
+  const path = pathInput.value.trim();
+  if (!file && !path) { alert('Seleccioná un archivo o poné una ruta'); return; }
+
+  goBtn.disabled = true;
+  goBtn.innerHTML = '<span class="spinner"></span>Convirtiendo…';
+  outSection.classList.remove('visible');
+  outSection.innerHTML = '';
+
+  const form = new FormData();
+  if (file) form.append('file', file);
+  if (path) form.append('path', path);
+  const frame = frameInput.value.trim();
+  if (frame) form.append('frame', frame);
+  form.append('scale', scaleInput.value);
+
+  try {
+    const res = await fetch('/convert', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Falló la conversión');
+    renderOutput(data);
+  } catch (err) {
+    outSection.innerHTML = `<div class="out-card"><div class="out-body"><div class="err">${htmlEscape(err.message)}</div></div></div>`;
+    outSection.classList.add('visible');
+  } finally {
+    goBtn.disabled = false;
+    goBtn.textContent = 'Convertir';
+  }
+}
+
+function renderOutput(data) {
+  const frameName = data.frame?.name || 'frame';
+  const outDir = data.outdir;
+  const ref = data.referencia;
+  const capas = data.capas || [];
+  const json = JSON.stringify(data, null, 1);
+
+  let html = `
+    <div class="out-card">
+      <div class="out-header">
+        <span class="out-badge">Listo</span>
+        <span class="out-path" title="${htmlEscape(outDir)}">${htmlEscape(outDir)}</span>
+        <button class="btn-link" id="openFolderBtn" ${!canOpenFolder() ? 'disabled' : ''}>Abrir carpeta</button>
+      </div>
+      <div class="out-body">`;
+
+  if (ref) {
+    html += `<img src="/preview?p=${encodeURIComponent(ref)}" alt="Referencia" style="width:100%;border-radius:10px;border:1px solid #2a3342;margin-bottom:16px;">`;
+  }
+  if (capas.length) {
+    html += '<div class="out-grid">';
+    capas.forEach(c => {
+      const name = c.split('/').pop();
+      html += `<div class="thumb"><img src="/preview?p=${encodeURIComponent(c)}" alt="${htmlEscape(name)}"><span class="label">${htmlEscape(name)}</span></div>`;
+    });
+    html += '</div>';
+  }
+  html += `<details style="margin-top:16px;"><summary style="cursor:pointer;color:#9aa5b8;font-size:13px;">Ver JSON completo</summary>
+    <div class="out-json">${htmlEscape(json)}</div></details>`;
+
+  html += '</div></div>';
+  outSection.innerHTML = html;
+  outSection.classList.add('visible');
+
+  // Abrir carpeta (solo funciona si el navegador permite file:// o usamos un endpoint)
+  document.getElementById('openFolderBtn')?.addEventListener('click', () => {
+    fetch('/open-folder?p=' + encodeURIComponent(outDir))
+      .then(r => r.json())
+      .then(j => { if (!j.ok) alert(j.error || 'No se pudo abrir'); });
+  });
+}
+
+function canOpenFolder() {
+  // El endpoint /open-folder siempre existe, el botón se habilita siempre
+  return true;
+}
+
+function htmlEscape(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'''})[c]);
+}
+
+goBtn.addEventListener('click', convertFile);
+pathInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') convertFile(); });
+frameInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') convertFile(); });
+scaleInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') convertFile(); });
+
+/* Actualizar button */
+updateBtn.addEventListener('click', checkUpdate);
+
+/* On page load */
+window.addEventListener('load', () => {
+  document.querySelector('.ver').textContent = currentVersion;
+});
 
   @media (max-width: 640px) {
     .options { grid-template-columns: 1fr; }
@@ -323,7 +540,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/":
-            return self._send(200, PAGE.replace("{{OUT}}", html.escape(OUT_BASE)))
+            body = PAGE.replace("{{VER}}", __version__)
+            body = body.replace("{{OUT}}", html.escape(OUT_BASE))
+            return self._send(200, body)
         if u.path == "/preview":
             p = parse_qs(u.query).get("p", [""])[0]
             real = os.path.realpath(p)
@@ -339,9 +558,7 @@ class Handler(BaseHTTPRequestHandler):
             real = os.path.realpath(p)
             if not real.startswith(os.path.realpath(OUT_BASE)) or not os.path.isdir(real):
                 return self._json(404, {"ok": False, "error": "carpeta no permitida"})
-            # En Linux con xdg-open
             try:
-                import subprocess
                 subprocess.Popen(["xdg-open", real], start_new_session=True)
                 return self._json(200, {"ok": True})
             except Exception as e:
@@ -349,8 +566,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, "no encontrado")
 
     def do_POST(self):
-        if urlparse(self.path).path != "/convert":
-            return self._json(404, {"ok": False, "error": "ruta desconocida"})
+        u = urlparse(self.path)
+        if u.path == "/convert":
+            return self._handle_convert()
+        if u.path == "/update":
+            ok, msg = git_update()
+            return self._json(200, {"ok": ok, "message": msg})
+        return self._json(404, {"ok": False, "error": "ruta desconocida"})
+
+    def _handle_convert(self):
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n)
         try:
@@ -401,3 +625,7 @@ def serve(port=8765):
     finally:
         srv.server_close()
     return 0
+
+
+if __name__ == "__main__":
+    serve()
