@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-"""Lanza la UI local de design2fusion y la abre en el navegador."""
+"""
+Lanzador para design2fusion - apoyo a la integración de escritorio.
+
+Uso:
+    ./launch_design2fusion.py [opciones]
+
+Opciones:
+    --web      Lanzar UI web (servidor + navegador) - modo legacy
+    --desktop  Lanzar app GTK4 nativa (nuevo modo)
+    --help     Mostrar este mensaje
+
+Si no se especifica opción, se lanza la app GTK4 nativa.
+"""
 import os
 import sys
 import subprocess
 import time
 import webbrowser
-import signal
+import argparse
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8765
@@ -16,31 +28,29 @@ def find_server_proc():
     """Devuelve el PID del proceso que escucha en el puerto 8765."""
     try:
         result = subprocess.run(
-            ["lsof", "-ti:8765"], capture_output=True, text=True, timeout=5
+            ["ss", "-tlnp"], capture_output=True, text=True, timeout=5
         )
-        pids = [p for p in result.stdout.strip().splitlines() if p]
-        return pids[0] if pids else None
+        for line in result.stdout.splitlines():
+            if f":{PORT}" in line:
+                # Extraer PID de "pid=XXXX"
+                for part in line.split():
+                    if "pid=" in part:
+                        return part.split("=")[1].split(",")[0]
+        return None
     except Exception:
         return None
 
 
-def start_server():
-    """Inicia el servidor si no está corriendo."""
-    pid = find_server_proc()
-    if pid:
-        print(f"design2fusion ya está corriendo (PID {pid})")
-        return None
-
-    script = os.path.join(APP_DIR, "d2f", "ui.py")
-    # Lanzamos `design2fusion --ui` (mismo entrypoint que el PATH)
+def start_web_ui():
+    """Inicia el servidor web si no está corriendo."""
     proc = subprocess.Popen(
-        [sys.executable, "-m", "d2f.ui"],
+        [os.path.expanduser("~/.local/bin/design2fusion"), "--ui"],
         cwd=APP_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    print(f"Servidor iniciado (PID {proc.pid})")
+    print(f"Servidor web iniciado (PID {proc.pid})")
     return proc
 
 
@@ -58,20 +68,51 @@ def wait_for_server(timeout=15):
     return False
 
 
-def main():
-    proc = start_server()
-    if proc is None:
-        # Ya está corriendo, solo abrimos el navegador
-        webbrowser.open(URL)
-        return
+def launch_desktop():
+    """Lanza la app GTK4 nativa directamente."""
+    exe = os.path.expanduser("~/.local/bin/design2fusion")
+    if not os.path.exists(exe):
+        exe = os.path.join(APP_DIR, "dist", "design2fusion")
+    
+    if not os.path.exists(exe):
+        print("Error: No se encontró el ejecutable design2fusion")
+        print(f"Busqué en: ~/.local/bin/design2fusion y dist/design2fusion")
+        return 1
+    
+    # Ejecutar directamente - la app GTK corre en primer plano
+    os.execv(exe, [exe, "--desktop"])
 
-    if wait_for_server():
-        print(f"UI lista: {URL}")
-        webbrowser.open(URL)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Lanzador design2fusion",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+    parser.add_argument("--web", action="store_true", help="Abrir UI web (servidor + navegador)")
+    parser.add_argument("--desktop", action="store_true", help="Abrir app GTK4 nativa (predetermiando)")
+    
+    args = parser.parse_args()
+    
+    if args.web:
+        # Modo web - iniciar servidor y abrir navegador
+        proc = find_server_proc()
+        if proc:
+            print(f"design2fusion ya está corriendo (PID {proc})")
+        else:
+            proc = start_web_ui()
+        
+        if wait_for_server():
+            print(f"UI lista: {URL}")
+            webbrowser.open(URL)
+        else:
+            print("No se pudo iniciar el servidor a tiempo.")
+            if proc:
+                proc.terminate()
     else:
-        print("No se pudo iniciar el servidor a tiempo.")
-        proc.terminate()
+        # Modo desktop - lanzar app nativa
+        launch_desktop()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

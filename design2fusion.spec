@@ -41,6 +41,15 @@ a = Analysis(
         "dataclasses",
         "typing",
         "d2f.ui",  # importado dinámicamente por cli.py --ui
+        "gi",
+        "gi.repository",
+        "gi.repository.Gtk",
+        "gi.repository.Adw",
+        "gi.repository.Gio",
+        "gi.repository.GLib",
+        "gi.repository.Gdk",
+        "gi.repository.GdkPixbuf",
+        "d2f.desktop_ui",  # importado dinámicamente por cli.py --desktop
     ],
     hookspath=[],
     hooksconfig={},

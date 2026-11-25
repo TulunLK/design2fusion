@@ -32,6 +32,8 @@ No tiene dependencias de Python fuera de la biblioteca estándar.
 
 ## Uso
 
+### CLI (línea de comandos)
+
 ```bash
 # un archivo local, el frame principal
 design2fusion slide.figcraft
@@ -45,9 +47,25 @@ design2fusion figma_file.json -o ./salida
 # Figma por URL o file key (delega en figma2fusion)
 design2fusion "https://www.figma.com/design/KEY/Nombre?node-id=3-1"
 
-# interfaz web local (arrastrar y soltar)
+# interfaz web local (arranca servidor + abre navegador)
 design2fusion --ui            # http://127.0.0.1:8765
 ```
+
+### App de escritorio (GTK4 nativa)
+
+```bash
+# abrir app de escritorio (GTK4, sin navegador)
+design2fusion --desktop
+
+# o usando el launcher
+launch_design2fusion.py --desktop
+```
+
+La app de escritorio es una interfaz gráfica completa con:
+- Zona de arrastrar y soltar archivos
+- Selector de frame y escala
+- Vista previa del resultado
+- Navegador de capas
 
 | Flag | Qué hace |
 | --- | --- |
@@ -58,7 +76,9 @@ design2fusion --ui            # http://127.0.0.1:8765
 | `--no-comp` | no genera el `.comp` |
 | `--no-kit` | no genera el kit de `.setting` |
 | `--json` | imprime el resultado como JSON (útil para scripts) |
-| `--ui` / `--port N` | levanta la interfaz web local |
+| `--ui` | levanta la interfaz web local |
+| `--desktop` | abre la app GTK4 nativa |
+| `--port N` | puerto para la UI web |
 | `--version` | versión |
 
 ## Qué genera
