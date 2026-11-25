@@ -723,7 +723,7 @@ def load_css():
 def main():
     load_css()
     app = Design2FusionApp()
-    return app.run(sys.argv)
+    return app.run([sys.argv[0]] if sys.argv else None)
 
 
 if __name__ == "__main__":
