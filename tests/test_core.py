@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from d2f.comp import _hex_of, generate_comp, lua_q  # noqa: E402
+from d2f.comp import _hex_of, generate_comp, lua_q, node_name  # noqa: E402
 from d2f.model import slug  # noqa: E402
 from d2f.settings import KIT, write_kit  # noqa: E402
 
@@ -72,33 +72,41 @@ class CompTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def test_comp_estructura(self):
+    def test_comp_nodos_sueltos(self):
         path = generate_comp(self.manifest, self.dir, log=lambda m: None)
         with open(path) as f:
             text = f.read()
         self.assertTrue(balanced(text), "llaves desbalanceadas en el .comp")
-        self.assertIn("MediaIn1 = MediaIn", text)
-        self.assertIn("Loader00 = Loader", text)
-        self.assertIn("Loader01 = Loader", text)
-        self.assertIn("BlurGlass1 = Blur", text)
-        self.assertIn("BitmapGlass1 = Bitmap", text)
+        # un nodo por capa, con el nombre del diseño
+        self.assertIn("Panel = Loader", text)
+        self.assertIn("REPRODUCIR = TextPlus", text)
         self.assertIn('FormatID = Input { Value = "OpenEXRFormat" }', text)
-        self.assertIn("Merge01 = Merge", text)
-        self.assertIn("Merge02 = Merge", text)
-        self.assertIn("ActiveTool = ", text)
-        # centro normalizado del panel: 1001/1920 y 1-227/1080
-        self.assertIn("0.521354", text)
-        self.assertIn("0.789815", text)
+        # nada cableado
+        self.assertNotIn("Merge", text)
+        self.assertNotIn("MediaIn", text)
+        self.assertNotIn("Bitmap", text)
+        self.assertNotIn("SourceOp", text)
+        self.assertIn('ActiveTool = "Panel"', text)
+        # el EXR sale a tamaño de frame, ya posicionado
+        exr = os.path.join(self.dir, "fusion", "01_panel.exr")
+        self.assertTrue(os.path.isfile(exr))
+        out = subprocess.run([shutil.which("identify") or "identify", "-format",
+                              "%wx%h", exr], capture_output=True, text=True)
+        self.assertEqual(out.stdout.strip(), "1920x1080")
 
-    def test_textplus_alternativo(self):
-        generate_comp(self.manifest, self.dir, log=lambda m: None)
-        snips = os.path.join(self.dir, "fusion", "textplus_alternativo.txt")
-        with open(snips) as f:
+    def test_textplus_en_el_comp(self):
+        path = generate_comp(self.manifest, self.dir, log=lambda m: None)
+        with open(path) as f:
             text = f.read()
-        self.assertIn("TextPlus_6", text)
+        self.assertIn("REPRODUCIR = TextPlus", text)
         self.assertIn('StyledText = Input { Value = "REPRODUCIR" }', text)
         self.assertIn('Font = Input { Value = "Inter" }', text)
-        self.assertTrue(balanced(text))
+        self.assertIn('Style = Input { Value = "Bold" }', text)
+        # el texto se edita en Fusion: no debe haber PNG de texto en el comp
+        self.assertNotIn("02_texto.exr", text)
+        # centro normalizado de la capa de texto
+        self.assertIn("0.521354", text)
+        self.assertIn("0.789815", text)
 
 
 class UtilTest(unittest.TestCase):

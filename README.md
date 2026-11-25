@@ -1,15 +1,14 @@
 # design2fusion
 
-Convierte diseños de **Figma, Penpot y FigCraft** en nodos de **Fusion (DaVinci Resolve)**:
-capas PNG con su caja exacta, un `manifest.json` con toda la geometría, un `.comp`
-listo para importar y un kit de macros `.setting` reutilizables.
+Convierte diseños de **Figma, Penpot y FigCraft** en **nodos de Fusion (DaVinci Resolve)**:
+un nodo por elemento, con el nombre que le diste en el diseño, ya posicionado y **sin
+conexiones** — las armás vos según la animación.
 
-En vez de hornear el diseño en una sola imagen, reconstruye cada elemento como un nodo
-separado: podés animar, reemplazar o desactivar cualquiera de ellos, y el vidrio
-(glass / background blur) se arma con un Blur enmascarado de verdad, no como un PNG
-plano.
+El texto no se hornea: se convierte en un **Text+ editable** con su contenido, fuente,
+tamaño, color y posición. Las formas e imágenes salen como **Loader** con la capa a frame
+completo, así al conectarlas aparecen en su lugar sin Transform ni Merge.
 
-Estado: **v0.1.0** — probado con FigCraft 0.18.1 y DaVinci Resolve 21.
+Estado: **v0.2.0** — probado con FigCraft 0.18.1 y DaVinci Resolve 21.
 
 ## Requisitos
 
@@ -70,11 +69,10 @@ design2fusion --ui            # http://127.0.0.1:8765
 ├── referencia.png                el frame completo renderizado (para comparar)
 ├── capas/
 │   ├── 01_Panel.png              capa con su caja exacta (alpha real)
-│   └── 01_Panel_mask.png         silueta limpia del vidrio (para el Blur)
+│   └── 01_Panel_mask.png         silueta limpia del vidrio (para tu Blur)
 ├── fusion/
-│   ├── Slide.comp                el comp listo para Import Comp
-│   ├── 01_Panel.exr              capas convertidas a EXR
-│   └── textplus_alternativo.txt  bloques Text+ para texto editable
+│   ├── Slide.comp                un nodo por capa, sin conexiones
+│   └── 01_Panel.exr              cada capa a frame completo (1920×1080, 16-bit)
 └── kit/
     ├── MediaIn.setting
     ├── TextPlus_Montserrat_Bold.setting
@@ -84,17 +82,17 @@ design2fusion --ui            # http://127.0.0.1:8765
     └── SoftGlow.setting
 ```
 
+Los nombres de nodo son los de tus capas, con espacios reemplazados por `_`
+(`Text 1` → `Text_1`), porque Fusion usa el nombre como identificador.
+
 ## En Resolve
 
 1. Poné tu video o imagen de fondo en **V1**.
 2. Clic derecho sobre el clip → **Fusion Clip**.
 3. En la página Fusion: **Fusion → Import Comp** → elegí `fusion/<frame>.comp`.
-4. Conectá tu `MediaIn` real a `MediaIn1` (el comp trae un MediaIn de relleno).
-5. Listo: cada capa es un `Loader` posicionado con un `Merge`, y el vidrio pasa por
-   `Blur` con la máscara del panel.
-
-Si querés **texto editable**, no uses el PNG del texto: pegá el bloque correspondiente
-de `fusion/textplus_alternativo.txt` en el comp y borrá ese `Loader`.
+4. Aparecen los nodos sueltos, ya nombrados y posicionados: los `TextPlus` con tu texto
+   editable y los `Loader` con la capa en su lugar.
+5. Conectá lo que necesites. No hay MediaIn ni Merge: la base es tuya.
 
 ## Formatos de entrada
 
@@ -108,8 +106,8 @@ de `fusion/textplus_alternativo.txt` en el comp y borrá ese `Loader`.
 
 ## Límites conocidos
 
-- **El borde del vidrio** (stroke con gradiente) no se exporta como capa: el comp trae
-  el relleno y el blur, pero no el contorno.
+- **El borde del vidrio** (stroke con gradiente) no se exporta como capa: el nodo trae el
+  tinte del panel y la silueta queda en `capas/_mask.png` para que armes el Blur en Fusion.
 - **Text+ asume texto centrado** en su caja. Si el diseño tiene el texto alineado a la
   izquierda en una caja más ancha, ajustá la justificación en Fusion.
 - **Un frame con fill de imagen** no entra como capa (es el fondo): usá `referencia.png`
@@ -119,6 +117,7 @@ de `fusion/textplus_alternativo.txt` en el comp y borrá ese `Loader`.
 - FigCraft **hornea el fondo** en las capas que tienen `backgroundBlur`; el script lo
   detecta, limpia los efectos antes de exportar y por eso genera `_mask.png` + el tinte
   por separado.
+- Los EXR van a frame completo, así que pesan ~16 MB por capa a 1080p.
 
 ## Cómo funciona
 
@@ -127,13 +126,15 @@ de `fusion/textplus_alternativo.txt` en el comp y borrá ese `Loader`.
 .penpot  ──┤ figcraft-cli convert ─┐
 .fig     ──┤                      ├─ MCP (FigCraft) ─ export por capa ─ manifest.json
 .json    ──┘                      │                                      │
-URL Figma ─ figma2fusion ─────────┘                                      ├─ comp.py ─ .comp + EXR
+URL Figma ─ figma2fusion ─────────┘                                      ├─ comp.py ─ .comp (nodos sueltos)
                                                                          └─ settings.py ─ kit
 ```
 
 El cliente MCP habla con `figcraft-cli mcp` por stdio y usa `export` con
 `includeBoundingBox: true`, así cada PNG mide exactamente lo que mide el nodo (sin el
-padding de las sombras).
+padding de las sombras). Después `comp.py` compone cada capa sobre un lienzo transparente
+del tamaño del frame y la convierte a EXR: de ahí que el nodo quede posicionado sin
+necesidad de cables.
 
 ## Tests
 
