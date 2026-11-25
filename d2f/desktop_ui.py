@@ -20,11 +20,13 @@ from pathlib import Path
 # Imports compatibles con pyinstaller
 try:
     from . import __version__
-    from .cli import OUT_BASE, convert
+    from .cli import convert
+    from .settings import OUT_BASE
 except ImportError:
     import d2f
     __version__ = d2f.__version__
-    from d2f.cli import OUT_BASE, convert
+    from d2f.cli import convert
+    from d2f.settings import OUT_BASE
 
 # -----------------------------------------------------------------------------
 # Constantes y utilidades

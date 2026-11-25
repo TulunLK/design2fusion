@@ -5,6 +5,10 @@ Resolve guarda al usar "Save Setting" sobre un nodo. El panel de vidrio no va
 aquí porque necesita la silueta del diseño: eso lo resuelve el .comp.
 """
 
+import os
+
+OUT_BASE = os.path.expanduser("~/Documentos/MotionGraphic/design2fusion")
+
 MEDIA_IN = """{
 \tTools = ordered() {
 \t\tMediaIn1 = MediaIn {

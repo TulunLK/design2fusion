@@ -15,7 +15,7 @@ try:
     from .convert import info, normalize, pick_frame
     from .mcp import MCP
     from .model import build_manifest
-    from .settings import write_kit
+    from .settings import OUT_BASE, write_kit
 except ImportError:
     # Modo standalone (pyinstaller)
     import d2f
@@ -24,9 +24,7 @@ except ImportError:
     from d2f.convert import info, normalize, pick_frame
     from d2f.mcp import MCP
     from d2f.model import build_manifest
-    from d2f.settings import write_kit
-
-OUT_BASE = os.path.expanduser("~/Documentos/MotionGraphic/design2fusion")
+    from d2f.settings import OUT_BASE, write_kit
 
 
 def _safe(name):
@@ -157,7 +155,10 @@ def main(argv=None):
     ap.add_argument("--desktop", action="store_true", help="abrir la app de escritorio nativa (GTK4)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--version", action="version", version="design2fusion " + __version__)
-    a = ap.parse_args(argv)
+    if argv is not None:
+        a = ap.parse_args(argv)
+    else:
+        a = ap.parse_args()
 
     if a.desktop:
         try:
