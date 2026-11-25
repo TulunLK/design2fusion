@@ -151,9 +151,7 @@ def main(argv=None):
     ap.add_argument("--no-comp", action="store_true", help="no generar el .comp")
     ap.add_argument("--no-kit", action="store_true", help="no generar el kit de .setting")
     ap.add_argument("--json", action="store_true", help="resumen en JSON")
-    ap.add_argument("--ui", action="store_true", help="abrir la interfaz web local")
     ap.add_argument("--desktop", action="store_true", help="abrir la app de escritorio nativa (GTK4)")
-    ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--version", action="version", version="design2fusion " + __version__)
     if argv is not None:
         a = ap.parse_args(argv)
@@ -166,14 +164,8 @@ def main(argv=None):
         except ImportError:
             from d2f.desktop_ui import main
         return main()
-    if a.ui:
-        try:
-            from .ui import serve
-        except ImportError:
-            from d2f.ui import serve
-        return serve(a.port)
     if not a.src:
-        ap.error("falta el archivo de entrada (o usá --ui)")
+        ap.error("falta el archivo de entrada")
 
     try:
         res = convert(a.src, a.frame, a.page, a.out, a.scale,
