@@ -193,14 +193,20 @@ def build_manifest(m, src, frame, outdir, scale=1.0):
             "png_rect": {"x": b["x"], "y": b["y"], "w": b["width"], "h": b["height"]},
         }
 
-        glass = glass_effect(node)
-        if glass:
-            mask_rel = "capas/%02d_%s_mask.png" % (z + 1, name)
-            g = export_glass(m, node, png_abs, os.path.join(outdir, mask_rel), scale)
-            g["mask"] = mask_rel
-            entry["glass"] = g
-        else:
-            export_layer(m, node["id"], png_abs, scale)
+        if node.get("type") in ("RECTANGLE", "ELLIPSE") and not glass and not image_fills(node):
+            fills = visible_fills(node)
+            solid_fill = next((f for f in fills if f.get("type") == "solid"), None)
+            if solid_fill:
+                entry["shape"] = {
+                    "type": node.get("type"),
+                    "color": _color_at(fills) or "#FFFFFF@100%",
+                    "corner_radius": node.get("cornerRadius", 0.0) or 0.0,
+                }
+                # Las formas vectoriales no necesitan exportar PNG de raster
+                if os.path.exists(png_abs):
+                    os.remove(png_abs)
+                entry.pop("png", None)
+                entry.pop("png_rect", None)
 
         cr = node.get("cornerRadius")
         if cr:

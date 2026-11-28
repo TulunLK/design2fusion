@@ -377,6 +377,9 @@ class MainWindow(Adw.ApplicationWindow):
         content.append(path_box)
 
         # Options
+        # Options container
+        options_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+
         opts_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
 
         frame_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -414,8 +417,29 @@ class MainWindow(Adw.ApplicationWindow):
         anim_box.append(anim_label)
         anim_box.append(self.anim_dd)
         opts_box.append(anim_box)
+        options_container.append(opts_box)
 
-        content.append(opts_box)
+        # Output directory selector
+        out_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        out_label = Gtk.Label(label="Carpeta de salida")
+        out_label.add_css_class("opt-label")
+        out_label.set_halign(Gtk.Align.START)
+        
+        out_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.out_entry = Gtk.Entry()
+        self.out_entry.set_placeholder_text("Por defecto: ~/Documentos/MotionGraphic/design2fusion/<frame>")
+        self.out_entry.set_hexpand(True)
+        
+        self.out_btn = Gtk.Button(label="Examinar…")
+        self.out_btn.connect("clicked", self.on_browse_out_clicked)
+        
+        out_row.append(self.out_entry)
+        out_row.append(self.out_btn)
+        
+        out_box.append(out_label)
+        out_box.append(out_row)
+        options_container.append(out_box)
+        content.append(options_container)
 
         # Convert button
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -439,6 +463,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_file = path
         self.path_entry.set_text(path)
 
+    def on_browse_out_clicked(self, _btn):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Seleccionar carpeta de salida")
+        dialog.select_folder(self, None, self.on_folder_selected)
+
+    def on_folder_selected(self, dialog, result):
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder:
+                path = folder.get_path()
+                if path:
+                    self.out_entry.set_text(path)
+        except Exception:
+            pass
+
     def on_convert_clicked(self, _widget=None):
         if self.converting:
             return
@@ -452,6 +491,7 @@ class MainWindow(Adw.ApplicationWindow):
         frame = self.frame_entry.get_text().strip() or None
         scale = self.scale_spin.get_value()
         anim = self.anim_ids[self.anim_dd.get_selected()]
+        out = self.out_entry.get_text().strip() or None
 
         self.set_converting(True)
         self.output.set_visible(False)
@@ -459,7 +499,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Ejecutar conversión en thread aparte
         thread = threading.Thread(
             target=self.run_conversion,
-            args=(file_path, frame, scale, anim),
+            args=(file_path, frame, scale, anim, out),
             daemon=True
         )
         thread.start()
@@ -474,14 +514,14 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.spinner.stop()
 
-    def run_conversion(self, src, frame, scale, text_anim="none"):
+    def run_conversion(self, src, frame, scale, text_anim="none", out=None):
         try:
             # Llamar a la función convert directamente (misma que CLI)
             result = convert(
                 src.rstrip("\r\n"),
                 frame,
                 None,  # page
-                None,  # out
+                out,   # out
                 scale,
                 True,  # make_comp
                 True,  # make_kit

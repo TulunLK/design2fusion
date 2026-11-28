@@ -129,6 +129,100 @@ def textplus_block(lay, fw, fh, name, pos=(0, 0)):
              px=pos[0], py=pos[1])
 
 
+def shape_block(lay, fw, fh, name, pos=(0, 0)):
+    """Genera Background + RectangleMask (o EllipseMask) nativos de Fusion para formas."""
+    s = lay["shape"]
+    r, g, b = _hex_of(s.get("color"))
+    opacity = float(s.get("opacity", 1.0))
+    cx = round(lay["center_x"] / fw, 6)
+    cy = round(1.0 - lay["center_y"] / fh, 6)
+    w = round(lay["width"] / fw, 6)
+    h = round(lay["height"] / fh, 6)
+    angle = lay.get("rotation_deg") or 0.0
+    cr = round(float(s.get("corner_radius") or 0.0) / min(lay["width"], lay["height"]) if min(lay["width"], lay["height"]) > 0 else 0.0, 4)
+    cr = min(max(cr, 0.0), 0.5)
+
+    is_ellipse = s.get("type") == "ELLIPSE"
+    mask_kind = "EllipseMask" if is_ellipse else "RectangleMask"
+    mask_name = name + "Mask"
+
+    # En Fusion, un Background conectado a una Mask genera la forma vectorial con color sólido.
+    # El Background lleva EffectMask conectado a la máscara.
+    bg_lines = [
+        "\t\t%s = Background {" % name,
+        "\t\t\tCtrlWZoom = false,",
+        "\t\t\tInputs = {",
+        "\t\t\t\tGlobalOut = Input { Value = 149, },",
+        "\t\t\t\tWidth = Input { Value = %d, }," % int(round(fw)),
+        "\t\t\t\tHeight = Input { Value = %d, }," % int(round(fh)),
+        "\t\t\t\tUseFrameFormatSettings = Input { Value = 1, },",
+        "\t\t\t\tTopLeftRed = Input { Value = %s, }," % r,
+        "\t\t\t\tTopLeftGreen = Input { Value = %s, }," % g,
+        "\t\t\t\tTopLeftBlue = Input { Value = %s, }," % b,
+        "\t\t\t\tTopLeftAlpha = Input { Value = %s, }," % opacity,
+        "\t\t\t\tEffectMask = Input {",
+        "\t\t\t\t\tSourceOp = %s," % lua_q(mask_name),
+        "\t\t\t\t\tsource = \"Mask\",",
+        "\t\t\t\t},",
+        "\t\t\t},",
+        "\t\t\tViewInfo = OperatorInfo { Pos = { %s, %s } }," % pos,
+        "\t\t},",
+    ]
+
+    mask_lines = [
+        "\t\t%s = %s {" % (mask_name, mask_kind),
+        "\t\t\tCtrlWZoom = false,",
+        "\t\t\tInputs = {",
+        "\t\t\t\tCenter = Input { Value = { %s, %s } }," % (cx, cy),
+        "\t\t\t\tWidth = Input { Value = %s, }," % w,
+        "\t\t\t\tHeight = Input { Value = %s, }," % h,
+        "\t\t\t\tAngle = Input { Value = %s, }," % angle,
+    ]
+    if not is_ellipse and cr > 0:
+        mask_lines.append("\t\t\t\tCornerRadius = Input { Value = %s }," % cr)
+
+    # Posicionamos la máscara un poco a la izquierda o arriba del background en el nodo flow
+    mask_pos = (pos[0] - 80, pos[1])
+    mask_lines.extend([
+        "\t\t\t},",
+        "\t\t\tViewInfo = OperatorInfo { Pos = { %s, %s } }," % mask_pos,
+        "\t\t},",
+    ])
+
+    return "\n".join(bg_lines + mask_lines)
+    t = lay["text"]
+    size = round(float(t.get("font_size_px") or 17) / fw, 6)
+    r, g, b = _hex_of(t.get("color"))
+    cx, cy = lay["center_x"], lay["center_y"]
+    return (
+        "\t\t{name} = TextPlus {{\n\t\t\tCtrlWZoom = false,\n\t\t\tInputs = {{\n"
+        "\t\t\t\tWidth = Input {{ Value = {fw}, }},\n"
+        "\t\t\t\tHeight = Input {{ Value = {fh}, }},\n"
+        "\t\t\t\tUseFrameFormatSettings = Input {{ Value = 1, }},\n"
+        "\t\t\t\tStyledText = Input {{ Value = {txt} }},\n"
+        "\t\t\t\tFont = Input {{ Value = {font} }},\n"
+        "\t\t\t\tStyle = Input {{ Value = {style} }},\n"
+        "\t\t\t\tSize = Input {{ Value = {size} }},\n"
+        "\t\t\t\tRed1 = Input {{ Value = {r} }},\n"
+        "\t\t\t\tGreen1 = Input {{ Value = {g} }},\n"
+        "\t\t\t\tBlue1 = Input {{ Value = {b} }},\n"
+        "\t\t\t\tAlpha1 = Input {{ Value = 1 }},\n"
+        "\t\t\t\tVerticalJustificationNew = Input {{ Value = 3 }},\n"
+        "\t\t\t\tHorizontalJustificationNew = Input {{ Value = 3 }},\n"
+        "\t\t\t\tCenter = Input {{ Value = {{{cx}, {cy}}} }},\n"
+        "\t\t\t\tAngle = Input {{ Value = {ang} }},\n"
+        "\t\t\t}},\n"
+        "\t\t\tViewInfo = OperatorInfo {{ Pos = {{ {px}, {py} }} }},\n"
+        "\t\t}},"
+    ).format(name=name, fw=fw, fh=fh, txt=lua_q(t.get("content", "")),
+             font=lua_q(t.get("font_family") or ""),
+             style=lua_q(t.get("font_style") or ""),
+             size=size, r=r, g=g, b=b,
+             cx=round(cx / fw, 6), cy=round(1.0 - cy / fh, 6),
+             ang=lay.get("rotation_deg") or 0,
+             px=pos[0], py=pos[1])
+
+
 # -----------------------------------------------------------------------------
 # Presets de texto tomados de Reactor
 #
@@ -301,6 +395,10 @@ def generate_comp(manifest, outdir, log=print, text_anim="none"):
                         "Reactor; uso TextPlus pelado" % text_anim)
                     anim_warned = True
             tools.append(block or textplus_block(lay, fw, fh, name, pos=pos))
+            created.append(name)
+            continue
+        if lay.get("shape"):
+            tools.append(shape_block(lay, fw, fh, name, pos=pos))
             created.append(name)
             continue
         png = os.path.join(outdir, lay["png"])
