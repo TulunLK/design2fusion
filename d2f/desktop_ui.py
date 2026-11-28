@@ -296,7 +296,7 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
         self.set_title("design2fusion")
-        self.set_default_size(900, 700)
+        self.set_default_size(1000, 950)
         self.set_icon_name("design2fusion")
 
         # Variables de estado

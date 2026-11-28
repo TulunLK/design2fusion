@@ -1,0 +1,2 @@
+[console_scripts]
+design2fusion = d2f.cli:main
