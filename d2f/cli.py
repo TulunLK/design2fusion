@@ -11,7 +11,7 @@ import tempfile
 # Imports compatibles con pyinstaller (standalone) y módulo normal
 try:
     from . import __version__
-    from .comp import generate_comp
+    from .comp import TEXT_ANIM_PRESETS, generate_comp
     from .convert import info, normalize, pick_frame
     from .mcp import MCP
     from .model import build_manifest
@@ -20,7 +20,7 @@ except ImportError:
     # Modo standalone (pyinstaller)
     import d2f
     __version__ = d2f.__version__
-    from d2f.comp import generate_comp
+    from d2f.comp import TEXT_ANIM_PRESETS, generate_comp
     from d2f.convert import info, normalize, pick_frame
     from d2f.mcp import MCP
     from d2f.model import build_manifest
@@ -40,7 +40,7 @@ def looks_like_figma(src):
         re.fullmatch(r"[A-Za-z0-9]{20,24}", src) is not None)
 
 
-def _figma(src, frame, out, scale, make_comp, make_kit, log):
+def _figma(src, frame, out, scale, make_comp, make_kit, log, text_anim="none"):
     """Delega en figma2fusion (API REST de Figma) y emite comp/kit propios."""
     exe = shutil.which("figma2fusion") or os.path.expanduser("~/.local/bin/figma2fusion")
     if not os.path.exists(exe):
@@ -65,7 +65,8 @@ def _figma(src, frame, out, scale, make_comp, make_kit, log):
         outdir = os.path.abspath(out or os.path.join(OUT_BASE, _safe(name)))
         shutil.copytree(tmp, outdir, dirs_exist_ok=True)
 
-    comp = generate_comp(manifest, outdir, log=log) if make_comp else None
+    comp = (generate_comp(manifest, outdir, log=log, text_anim=text_anim)
+            if make_comp else None)
     kit = write_kit(outdir) if make_kit else []
     fr = manifest["frame"]
     return {
@@ -85,11 +86,12 @@ def _figma(src, frame, out, scale, make_comp, make_kit, log):
 
 
 def convert(src, frame=None, page=None, out=None, scale=1.0,
-            make_comp=True, make_kit=True, log=None):
+            make_comp=True, make_kit=True, log=None, text_anim="none"):
     """Convierte un archivo de diseño en capas + manifest + comp + kit."""
     log = log or (lambda m: None)
     if looks_like_figma(src):
-        return _figma(src, frame, out, scale, make_comp, make_kit, log)
+        return _figma(src, frame, out, scale, make_comp, make_kit, log,
+                      text_anim=text_anim)
     with tempfile.TemporaryDirectory(prefix="d2f-") as tmp:
         log("normalizando %s" % src)
         path, _label = normalize(src, tmp)
@@ -104,7 +106,8 @@ def convert(src, frame=None, page=None, out=None, scale=1.0,
         with MCP() as m:
             manifest, warnings = build_manifest(m, path, fr, outdir, scale=scale)
 
-        comp = generate_comp(manifest, outdir, log=log) if make_comp else None
+        comp = (generate_comp(manifest, outdir, log=log, text_anim=text_anim)
+            if make_comp else None)
         kit = write_kit(outdir) if make_kit else []
         return {
             "ok": True,
@@ -150,6 +153,9 @@ def main(argv=None):
                     help="escala de los PNG (1 = tamaño del diseño)")
     ap.add_argument("--no-comp", action="store_true", help="no generar el .comp")
     ap.add_argument("--no-kit", action="store_true", help="no generar el kit de .setting")
+    ap.add_argument("--text-anim", choices=["none"] + sorted(TEXT_ANIM_PRESETS),
+                    default="none",
+                    help="animación de los textos del .comp (macros de Reactor)")
     ap.add_argument("--json", action="store_true", help="resumen en JSON")
     ap.add_argument("--desktop", action="store_true", help="abrir la app de escritorio nativa (GTK4)")
     ap.add_argument("--version", action="version", version="design2fusion " + __version__)
@@ -170,7 +176,8 @@ def main(argv=None):
     try:
         res = convert(a.src, a.frame, a.page, a.out, a.scale,
                       not a.no_comp, not a.no_kit,
-                      log=lambda m: print(m, file=sys.stderr))
+                      log=lambda m: print(m, file=sys.stderr),
+                      text_anim=a.text_anim)
     except (RuntimeError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1

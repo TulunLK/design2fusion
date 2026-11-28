@@ -76,9 +76,8 @@ La app de escritorio es una interfaz gráfica completa con:
 | `--no-comp` | no genera el `.comp` |
 | `--no-kit` | no genera el kit de `.setting` |
 | `--json` | imprime el resultado como JSON (útil para scripts) |
-| `--ui` | levanta la interfaz web local |
+| `--text-anim PRESET` | animación de los textos del `.comp`: `none`, `scale-in` o `letter-slide` (macros de Reactor instaladas en Resolve) |
 | `--desktop` | abre la app GTK4 nativa |
-| `--port N` | puerto para la UI web |
 | `--version` | versión |
 
 ## Qué genera

@@ -109,6 +109,96 @@ class CompTest(unittest.TestCase):
         self.assertIn("0.789815", text)
 
 
+class PresetTest(unittest.TestCase):
+    """Inyección de macros de Reactor sin depender de que estén instaladas."""
+
+    MACRO = """{
+\tTools = ordered() {
+\t\tScaleIn = GroupOperator {
+\t\t\tInputs = ordered() {
+\t\t\t\tStyledText = InstanceInput { SourceOp = "Template", Source = "StyledText", Page = "Controls", },
+\t\t\t\tSize = InstanceInput { SourceOp = "Template", Source = "Size", Page = "Controls", Default = 0.08, },
+\t\t\t},
+\t\t\tOutputs = { MainOutput1 = InstanceOutput { SourceOp = "Template", Source = "Output", } },
+\t\t\tTools = ordered() {
+\t\t\t\tTemplate = TextPlus {
+\t\t\t\t\tInputs = {
+\t\t\t\t\t\tGlobalOut = Input { Value = 149, },
+\t\t\t\t\t\tWidth = Input { Value = 1920, },
+\t\t\t\t\t\tHeight = Input { Value = 1080, },
+\t\t\t\t\t\tStyledText = Input { Value = "Scale In", },
+\t\t\t\t\t\tFont = Input { Value = "Open Sans", },
+\t\t\t\t\t\tStyle = Input { Value = "Bold", },
+\t\t\t\t\t\tVerticalJustificationNew = Input { Value = 3, },
+\t\t\t\t\t},
+\t\t\t\t\tViewInfo = OperatorInfo { Pos = { 0, 16.5 } },
+\t\t\t\t},
+\t\t\t}
+\t\t}
+\t},
+\tActiveTool = "ScaleIn"
+}
+"""
+
+    LAYER = {
+        "name": "REPRODUCIR", "center_x": 1001.0, "center_y": 227.0,
+        "rotation_deg": 0,
+        "text": {"content": "REPRODUCIR", "font_family": "Inter",
+                 "font_style": "Bold", "font_size_px": 17.0,
+                 "color": "#FFFFFF@100%"},
+    }
+
+    def _with_macro(self):
+        import d2f.comp as C
+        d = tempfile.mkdtemp(prefix="d2f-macro-")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.makedirs(os.path.join(d, "Macros"))
+        with open(os.path.join(d, "Macros", "Scale In.setting"), "w") as f:
+            f.write(self.MACRO)
+        old = C.MACRO_DIRS
+        C.MACRO_DIRS = (d,)
+        self.addCleanup(setattr, C, "MACRO_DIRS", old)
+        return C
+
+    def test_inyecta_groupoperator(self):
+        C = self._with_macro()
+        block = C.anim_text_block("scale-in", self.LAYER, 1920.0, 1080.0, "Titulo")
+        self.assertTrue(balanced(block), "llaves desbalanceadas")
+        self.assertTrue(block.lstrip("\t").startswith("Titulo = GroupOperator {"))
+        self.assertIn('StyledText = Input { Value = "REPRODUCIR" }', block)
+        self.assertIn('Font = Input { Value = "Inter" }', block)
+        self.assertIn("Size = Input { Value = 0.008854 }", block)
+        self.assertIn("Center = Input { Value = { 0.521354, 0.789815 } }", block)
+        self.assertIn("Blue1 = Input { Value = 1.0 }", block)
+        self.assertNotIn("GlobalOut", block)
+
+    def test_preset_ausente_cae_en_textplus(self):
+        import d2f.comp as C
+        d = tempfile.mkdtemp(prefix="d2f-vacio-")
+        self.addCleanup(shutil.rmtree, d, True)
+        old = C.MACRO_DIRS
+        C.MACRO_DIRS = (d,)
+        self.addCleanup(setattr, C, "MACRO_DIRS", old)
+        manifest = {
+            "source": {"frame_name": "Slide"},
+            "frame": {"width": 1920.0, "height": 1080.0},
+            "layers": [dict(self.LAYER, z=0, opacity=1, width=110.0,
+                            height=18.0, figma_type="TEXT",
+                            png="capas/02_texto.png",
+                            png_rect={"x": 0, "y": 0, "w": 1, "h": 1},
+                            blend_mode="normal")],
+        }
+        with tempfile.TemporaryDirectory() as out:
+            avisos = []
+            path = generate_comp(manifest, out, log=avisos.append,
+                                 text_anim="scale-in")
+            with open(path) as f:
+                text = f.read()
+        self.assertTrue(balanced(text))
+        self.assertIn("REPRODUCIR = TextPlus", text)
+        self.assertTrue(any("no está instalado" in a for a in avisos))
+
+
 class UtilTest(unittest.TestCase):
     def test_lua_q_escapa(self):
         self.assertEqual(lua_q('a"b\\c'), '"a\\"b/c"')

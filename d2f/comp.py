@@ -129,7 +129,156 @@ def textplus_block(lay, fw, fh, name, pos=(0, 0)):
              px=pos[0], py=pos[1])
 
 
-def generate_comp(manifest, outdir, log=print):
+# -----------------------------------------------------------------------------
+# Presets de texto tomados de Reactor
+#
+# No se redistribuyen las macros: se leen del equipo donde el usuario ya las
+# instaló con Reactor (o desde la carpeta de macros de Resolve) y se inyecta su
+# GroupOperator en el .comp, con los valores de la capa. Así el texto llega con
+# animación de entrada y una página "Controls" ordenada.
+# -----------------------------------------------------------------------------
+TEXT_ANIM_PRESETS = {
+    "scale-in": "Scale In",
+    "letter-slide": "Letter Slide Up + Fade Bounce",
+}
+
+MACRO_DIRS = (
+    "~/.local/share/DaVinciResolve/Fusion/Macros",
+    "~/Reactor/Deploy/Macros",
+    "~/Reactor/Atoms",
+    "/opt/resolve/Fusion/Macros",
+)
+
+
+def find_macro(preset):
+    """Ruta del .setting del preset, o None si no está instalado."""
+    fname = TEXT_ANIM_PRESETS.get(preset)
+    if not fname:
+        return None
+    for d in MACRO_DIRS:
+        root = os.path.expanduser(d)
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            if fname + ".setting" in files:
+                return os.path.join(dirpath, fname + ".setting")
+    return None
+
+
+def _span(s, start):
+    """(ini, fin) del bloque {...} que abre en/después de start."""
+    i = s.index("{", start)
+    depth = 0
+    for k in range(i, len(s)):
+        if s[k] == "{":
+            depth += 1
+        elif s[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return i, k + 1
+    raise ValueError("llave sin cerrar")
+
+
+def _tool_span(s, kind, name):
+    """(ini, fin) del tool `name = kind { ... }` dentro del grupo."""
+    m = re.search(r"(?m)^[ \t]*(%s = %s \{)" % (re.escape(name), kind), s)
+    if not m:
+        return None
+    return m.start(1), _span(s, m.start(1))[1]
+
+
+def _upsert_input(tool, key, expr):
+    """Reemplaza `key = Input {...}` o lo agrega a la tabla Inputs del tool."""
+    m = re.search(r"(?m)^([ \t]*)%s = Input \{" % re.escape(key), tool)
+    if m:
+        j = _span(tool, m.start())[1]
+        tail = j + 1 if tool[j:j + 1] == "," else j
+        return (tool[:m.start()]
+                + "%s%s = Input { %s }," % (m.group(1), key, expr)
+                + tool[tail:])
+    im = re.search(r"(?m)^([ \t]*)Inputs = \{", tool)
+    if not im:
+        return tool
+    close = _span(tool, im.start())[1] - 1
+    line = tool.rfind("\n", 0, close) + 1
+    # el input anterior puede ser el último y no llevar coma: se la agregamos
+    prev_end = line - 1
+    prev_start = tool.rfind("\n", 0, prev_end) + 1
+    if (not tool[prev_start:prev_end].rstrip().endswith(",")
+            and prev_start > im.start()):
+        tool = tool[:prev_end] + "," + tool[prev_end:]
+        line += 1
+    indent = im.group(1) + "\t"
+    return (tool[:line] + "%s%s = Input { %s },\n" % (indent, key, expr)
+            + tool[line:])
+
+
+def _drop_input(tool, key):
+    m = re.search(r"(?m)^[ \t]*%s = Input \{" % re.escape(key), tool)
+    if not m:
+        return tool
+    j = _span(tool, m.start())[1]
+    if tool[j:j + 1] == ",":
+        j += 1
+    return tool[:m.start()] + tool[tool.index("\n", j) + 1:]
+
+
+def anim_text_block(preset, lay, fw, fh, name):
+    """GroupOperator del preset con los valores de la capa, o None."""
+    path = find_macro(preset)
+    if not path:
+        return None
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r"(?m)^([ \t]*)([A-Za-z_]\w* = GroupOperator \{)", src)
+    if not m:
+        return None
+    indent = m.group(1)
+    group = src[m.start(2):_span(src, m.start(2))[1]]
+    # los tools internos viven en el ámbito del grupo: solo cambia su nombre
+    group = indent + name + group[group.index(" ="):]
+
+    ts = _tool_span(group, "TextPlus", "Template")
+    if not ts:
+        return None
+    tool = group[ts[0]:ts[1]]
+
+    t = lay["text"]
+    size = round(float(t.get("font_size_px") or 17) / fw, 6)
+    r, g, b = _hex_of(t.get("color"))
+    cx = round(lay["center_x"] / fw, 6)
+    cy = round(1.0 - lay["center_y"] / fh, 6)
+
+    tool = _upsert_input(tool, "Width", "Value = %d" % int(round(fw)))
+    tool = _upsert_input(tool, "Height", "Value = %d" % int(round(fh)))
+    tool = _upsert_input(tool, "UseFrameFormatSettings", "Value = 1")
+    tool = _drop_input(tool, "GlobalOut")
+    tool = _upsert_input(tool, "Font",
+                         "Value = " + lua_q(t.get("font_family") or "Open Sans"))
+    tool = _upsert_input(tool, "Style",
+                         "Value = " + lua_q(t.get("font_style") or "Bold"))
+    tool = _upsert_input(tool, "Size", "Value = %s" % size)
+    tool = _upsert_input(tool, "Center", "Value = { %s, %s }" % (cx, cy))
+    for k, v in (("Red1", r), ("Green1", g), ("Blue1", b), ("Alpha1", 1)):
+        tool = _upsert_input(tool, k, "Value = %s" % v)
+
+    if preset == "letter-slide":
+        # StyledText está cableado desde el Follower: el texto va ahí
+        fs = _tool_span(group, "StyledTextFollower", "FollowerLetterAnimation")
+        if not fs:
+            return None
+        follower = group[fs[0]:fs[1]]
+        follower = _upsert_input(follower, "Text",
+                                 "Value = " + lua_q(t.get("content", "")))
+        group = group[:fs[0]] + follower + group[fs[1]:]
+    else:
+        tool = _upsert_input(tool, "StyledText",
+                             "Value = " + lua_q(t.get("content", "")))
+
+    return group[:ts[0]] + tool + group[ts[1]:] + ","
+
+
+def generate_comp(manifest, outdir, log=print, text_anim="none"):
     """Escribe <outdir>/fusion/<frame>.comp con nodos sueltos (sin cables)."""
     fw = float(manifest["frame"]["width"])
     fh = float(manifest["frame"]["height"])
@@ -139,11 +288,19 @@ def generate_comp(manifest, outdir, log=print):
     comp_path = os.path.join(fdir, safe + ".comp")
 
     tools, used, created = [], set(), []
+    anim_warned = False
     for i, lay in enumerate(manifest["layers"]):
         name = node_name(lay.get("name"), used)
         pos = ((i % GRID_COLS) * GRID_DX, (i // GRID_COLS) * GRID_DY)
         if lay.get("text"):
-            tools.append(textplus_block(lay, fw, fh, name, pos=pos))
+            block = None
+            if text_anim not in (None, "", "none"):
+                block = anim_text_block(text_anim, lay, fw, fh, name)
+                if block is None and not anim_warned:
+                    log("  aviso: preset de texto %r no está instalado en Resolve/"
+                        "Reactor; uso TextPlus pelado" % text_anim)
+                    anim_warned = True
+            tools.append(block or textplus_block(lay, fw, fh, name, pos=pos))
             created.append(name)
             continue
         png = os.path.join(outdir, lay["png"])

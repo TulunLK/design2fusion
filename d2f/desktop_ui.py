@@ -401,6 +401,20 @@ class MainWindow(Adw.ApplicationWindow):
         scale_box.append(self.scale_spin)
         opts_box.append(scale_box)
 
+        anim_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        anim_label = Gtk.Label(label="Animación de texto")
+        anim_label.add_css_class("opt-label")
+        anim_label.set_halign(Gtk.Align.START)
+        self.anim_ids = ["none", "scale-in", "letter-slide"]
+        self.anim_dd = Gtk.DropDown.new_from_strings([
+            "Sin animación",
+            "Entrada (Reactor: Scale In)",
+            "Letra a letra (Reactor: Letter Slide)",
+        ])
+        anim_box.append(anim_label)
+        anim_box.append(self.anim_dd)
+        opts_box.append(anim_box)
+
         content.append(opts_box)
 
         # Convert button
@@ -437,6 +451,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         frame = self.frame_entry.get_text().strip() or None
         scale = self.scale_spin.get_value()
+        anim = self.anim_ids[self.anim_dd.get_selected()]
 
         self.set_converting(True)
         self.output.set_visible(False)
@@ -444,7 +459,7 @@ class MainWindow(Adw.ApplicationWindow):
         # Ejecutar conversión en thread aparte
         thread = threading.Thread(
             target=self.run_conversion,
-            args=(file_path, frame, scale),
+            args=(file_path, frame, scale, anim),
             daemon=True
         )
         thread.start()
@@ -459,7 +474,7 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             self.spinner.stop()
 
-    def run_conversion(self, src, frame, scale):
+    def run_conversion(self, src, frame, scale, text_anim="none"):
         try:
             # Llamar a la función convert directamente (misma que CLI)
             result = convert(
@@ -470,7 +485,8 @@ class MainWindow(Adw.ApplicationWindow):
                 scale,
                 True,  # make_comp
                 True,  # make_kit
-                log=lambda m: print(m, file=sys.stderr)
+                log=lambda m: print(m, file=sys.stderr),
+                text_anim=text_anim,
             )
 
             # Agregar lista de capas
